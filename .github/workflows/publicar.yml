@@ -1,0 +1,76 @@
+name: Publicar
+
+on:
+  schedule:
+    # Cada hora, minuto 7 (GitHub atrasa las corridas en punto). Hora UTC.
+    - cron: "7 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Solo mostrar qué haría (no publica ni escribe en Notion)"
+        type: boolean
+        default: false
+
+# Nunca dos corridas a la vez (evita publicar dos veces lo mismo)
+concurrency:
+  group: publicador
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # medios (si van a este mismo repo) y latido semanal
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Publicar lo aprobado
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          # Por defecto los medios van a este mismo repo (tiene que ser público) con el token del job.
+          # Para separarlos en otro repo: crear los secrets MEDIA_REPO y MEDIA_REPO_TOKEN.
+          MEDIA_REPO: ${{ secrets.MEDIA_REPO || github.repository }}
+          MEDIA_REPO_TOKEN: ${{ secrets.MEDIA_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          MEDIA_URL_BASE: ${{ vars.MEDIA_URL_BASE }}
+          X_CONSUMER_KEY: ${{ secrets.X_CONSUMER_KEY }}
+          X_CONSUMER_SECRET: ${{ secrets.X_CONSUMER_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+          TIMEZONE: America/Asuncion
+          MAX_DELAY_HOURS: "48"
+          TOKEN_WARN_DAYS: "7"
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+        run: python -m publicador.main
+
+      # GitHub apaga los cron de repos sin commits durante 60 días.
+      # Un commit automático por semana lo mantiene vivo.
+      - name: Latido semanal
+        if: always()
+        run: |
+          set -e
+          last=$(cat state/heartbeat.txt 2>/dev/null || echo 1970-01-01)
+          today=$(date -u +%Y-%m-%d)
+          if [ $(( ( $(date -u -d "$today" +%s) - $(date -u -d "$last" +%s) ) / 86400 )) -ge 7 ]; then
+            echo "$today" > state/heartbeat.txt
+            git config user.name "publicador-bot"
+            git config user.email "publicador-bot@users.noreply.github.com"
+            git add state/heartbeat.txt
+            git commit -m "latido $today"
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}"
+            git push
+          else
+            echo "Latido reciente ($last); nada que hacer"
+          fi
