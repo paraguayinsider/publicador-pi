@@ -150,15 +150,25 @@ def check_media(s) -> bool:
         bad(f"{s.media_repo} es privado: Instagram no podrá leer las imágenes. Tiene que ser público.")
         return False
     ok(f"{s.media_repo} es público (rama {s.media_branch})")
-    perms = data.get("permissions")
-    if perms is None:
-        warn("No pude confirmar el permiso de escritura del token (se verá en la primera publicación)")
-    elif not perms.get("push"):
-        bad("El token no tiene permiso de escritura (Contents: read and write) sobre el repo")
-        return False
-    else:
-        ok("Token con permiso de escritura")
-    return True
+    # Prueba real de escritura: crea/actualiza un archivo chico en state/ (el token del job
+    # de Actions no informa 'permissions', así que la única prueba fiable es escribir).
+    import base64
+    from datetime import datetime, timezone
+    path = "state/media_check.txt"
+    url = f"https://api.github.com/repos/{s.media_repo}/contents/{path}"
+    headers = {"Authorization": f"Bearer {s.media_repo_token}", "Accept": "application/vnd.github+json"}
+    body = {"message": "chequeo: prueba de escritura", "branch": s.media_branch,
+            "content": base64.b64encode(datetime.now(timezone.utc).isoformat().encode()).decode()}
+    prev = requests.get(url, headers=headers, params={"ref": s.media_branch}, timeout=30)
+    if prev.status_code == 200:
+        body["sha"] = prev.json()["sha"]
+    w = requests.put(url, headers=headers, json=body, timeout=60)
+    if w.status_code in (200, 201):
+        ok("Escritura en el repo verificada (state/media_check.txt)")
+        return True
+    bad(f"No pude escribir en el repo ({w.status_code}): {w.text[:200]}. "
+        "Revisá 'permissions: contents: write' en el workflow o el token MEDIA_REPO_TOKEN.")
+    return False
 
 
 def check_x(s) -> bool:
