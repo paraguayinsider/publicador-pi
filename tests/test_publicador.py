@@ -126,8 +126,6 @@ def test_validate_rules():
         r.validate(db.parse_page(page("p3", formato="carrusel")), now)
     with pytest.raises(PublishError, match="1 video"):
         r.validate(db.parse_page(page("p4", formato="reel")), now)
-    with pytest.raises(PublishError, match="X no está configurado"):
-        r.validate(db.parse_page(page("p5", red="X", formato="solo texto")), now)
     with pytest.raises(PublishError, match="no reconocida"):
         r.validate(db.parse_page(page("p6", red="TikTok")), now)
     r.validate(db.parse_page(page("ok", red="Facebook", formato="solo texto", files=())), now)
@@ -153,7 +151,7 @@ def test_dry_run_end_to_end(caplog):
     assert code == 0
     log = caplog.text
     assert "Listo: 2 publicadas, 1 con error, 1 omitidas" in log
-    assert "LinkedIn se programa a mano" in log
+    assert "linkedin se programa a mano" in log
     assert "Instagram no admite publicaciones sin imagen" in log
     assert "quedó en Publicando" in log
     # en dry run no se escribió nada en Notion
@@ -203,3 +201,39 @@ def test_real_run_instagram_image_writes_back(monkeypatch):
     ig_call = [c for c in responses.calls if c.request.url.endswith("/17841/media")][0]
     assert "image_url=https%3A%2F%2Fraw.githubusercontent.com%2Faugusto%2Fpi-media%2Fmain%2F" in ig_call.request.body
     assert "caption=Hola" in ig_call.request.body
+
+
+# ---------------- LinkedIn ----------------
+def test_ltf_escape_hashtags_and_reserved():
+    from publicador.linkedin import ltf_escape
+    out = ltf_escape("Dato (BCP) 6,6% #Paraguay y #VivirEnParaguay_2026 *ojo*")
+    assert out == "Dato \\(BCP\\) 6,6% {hashtag|\\#|Paraguay} y {hashtag|\\#|VivirEnParaguay_2026} \\*ojo\\*"
+
+
+@responses.activate
+def test_manual_networks_are_skipped_not_errored():
+    # Sin claves de X ni token de LinkedIn: las filas quedan en Aprobado (skip), no en Error
+    mock_notion(responses, [page("p1", red="X", formato="solo texto", files=()),
+                            page("p2", red="LinkedIn", formato="solo texto", files=())])
+    responses.get("https://graph.facebook.com/v24.0/debug_token", json={"data": {"is_valid": True, "expires_at": 0}})
+    r = Runner(settings())
+    assert r.run() == 0
+    assert not [c for c in responses.calls if c.request.method == "PATCH"]
+
+
+@responses.activate
+def test_linkedin_text_post_real_mode():
+    mock_notion(responses, [page("p1", red="LinkedIn", formato="solo texto", texto="Hola #Paraguay", files=())])
+    responses.get("https://graph.facebook.com/v24.0/debug_token", json={"data": {"is_valid": True, "expires_at": 0}})
+    responses.get("https://api.linkedin.com/v2/userinfo", json={"sub": "abc123", "name": "Augusto"})
+    responses.post("https://api.linkedin.com/rest/posts", status=201, headers={"x-restli-id": "urn:li:share:999"})
+    patched = []
+    responses.add_callback(responses.PATCH, "https://api.notion.com/v1/pages/p1",
+                           callback=lambda r: (patched.append(json.loads(r.body)) or (200, {}, "{}")),
+                           content_type="application/json")
+    s = settings(dry_run=False, linkedin_access_token="tok-li")
+    assert Runner(s).run() == 0
+    body = json.loads([c for c in responses.calls if c.request.url.endswith("/rest/posts")][0].request.body)
+    assert body["author"] == "urn:li:person:abc123"
+    assert body["commentary"] == "Hola {hashtag|\\#|Paraguay}"
+    assert patched[-1]["properties"][PROPS["url_publicada"]]["url"] == "https://www.linkedin.com/feed/update/urn:li:share:999/"
