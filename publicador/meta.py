@@ -22,7 +22,24 @@ class Graph:
             raise RuntimeError("Faltan META_PAGE_ID o META_PAGE_TOKEN")
         self.s = settings
         self.base = f"https://graph.facebook.com/{settings.graph_version}"
-        self.token = settings.meta_page_token
+        self.token = settings.meta_page_token  # puede ser token de página, de usuario o de usuario del sistema
+        self._page_token: str | None = None
+
+    def page_token(self) -> str:
+        """Token de página para publicar. Si META_PAGE_TOKEN es de usuario o de usuario del
+        sistema (Business Manager), se canjea por el token de la página una vez por corrida."""
+        if self._page_token:
+            return self._page_token
+        info = self.call("GET", "debug_token", input_token=self.token)["data"]
+        if info.get("type") == "PAGE":
+            self._page_token = self.token
+        else:
+            data = self.call("GET", self.s.meta_page_id, fields="access_token")
+            if not data.get("access_token"):
+                raise PublishError("El token no tiene acceso a la página (falta asignarla al usuario del sistema "
+                                   "o el permiso pages_manage_posts)")
+            self._page_token = data["access_token"]
+        return self._page_token
 
     def call(self, method: str, path: str, **params) -> dict:
         params.setdefault("access_token", self.token)
@@ -58,32 +75,34 @@ class Graph:
         if self.s.dry_run:
             log.info("[DRY RUN] Facebook %s: %r + %s", fmt, text[:60], media_urls)
             return "https://www.facebook.com/dry-run"
+        tk = self.page_token()
         if fmt == "solo texto":
             params = {"message": text}
             links = URL_RE.findall(text)
             if links:
                 params["link"] = links[0].rstrip(".,)")
-            post_id = self.call("POST", f"{page}/feed", **params)["id"]
+            post_id = self.call("POST", f"{page}/feed", access_token=tk, **params)["id"]
         elif fmt == "imagen":
-            res = self.call("POST", f"{page}/photos", url=media_urls[0], message=text)
+            res = self.call("POST", f"{page}/photos", access_token=tk, url=media_urls[0], message=text)
             post_id = res.get("post_id") or res["id"]
         elif fmt == "carrusel":
-            ids = [self.call("POST", f"{page}/photos", url=u, published="false")["id"] for u in media_urls]
+            ids = [self.call("POST", f"{page}/photos", access_token=tk, url=u, published="false")["id"]
+                   for u in media_urls]
             import json
-            post_id = self.call("POST", f"{page}/feed", message=text,
+            post_id = self.call("POST", f"{page}/feed", access_token=tk, message=text,
                                 attached_media=json.dumps([{"media_fbid": i} for i in ids]))["id"]
         elif fmt == "reel":
-            res = self.call("POST", f"{page}/videos", file_url=media_urls[0], description=text)
+            res = self.call("POST", f"{page}/videos", access_token=tk, file_url=media_urls[0], description=text)
             vid = res["id"]
             return self._fb_video_permalink(vid)
         else:
             raise PublishError(f"Formato '{fmt}' no soportado en Facebook")
-        return self.call("GET", post_id, fields="permalink_url").get("permalink_url") \
+        return self.call("GET", post_id, access_token=tk, fields="permalink_url").get("permalink_url") \
             or f"https://www.facebook.com/{post_id}"
 
     def _fb_video_permalink(self, video_id: str) -> str:
         for _ in range(10):
-            data = self.call("GET", video_id, fields="permalink_url,status")
+            data = self.call("GET", video_id, access_token=self.page_token(), fields="permalink_url,status")
             url = data.get("permalink_url")
             if url:
                 return url if url.startswith("http") else f"https://www.facebook.com{url}"

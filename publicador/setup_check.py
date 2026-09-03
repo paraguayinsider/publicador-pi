@@ -113,7 +113,14 @@ def check_meta(s) -> bool:
         good = False
     try:
         exp = g.token_expiry()
-        ok("Token válido; " + ("no vence" if exp is None else f"vence el {exp.date()}"))
+        ttype = g.call("GET", "debug_token", input_token=g.token)["data"].get("type", "?")
+        ok(f"Token válido (tipo {ttype}); " + ("no vence" if exp is None else f"vence el {exp.date()}"))
+        try:
+            g.page_token()
+            ok("Token de página obtenido para publicar en Facebook")
+        except Exception as exc:
+            bad(f"No pude obtener el token de página: {exc}")
+            good = False
         scopes = set(g.token_scopes())
         needed = {"pages_manage_posts", "pages_read_engagement", "instagram_basic", "instagram_content_publish"}
         missing = needed - scopes
