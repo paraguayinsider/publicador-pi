@@ -14,7 +14,7 @@ Notion (Calendario editorial)  ←→  GitHub Actions (cada hora)  →  Facebook
 |---|---|
 | `publicador/main.py` | La corrida: lee Notion, valida, publica, escribe de vuelta |
 | `publicador/notion_db.py` | Lectura/escritura de la base de Notion |
-| `publicador/media.py` | Baja la imagen de Notion, la convierte a JPEG y la sube a `pi-media` |
+| `publicador/media.py` | Baja la imagen de Notion, la convierte a JPEG y la guarda en el repo público |
 | `publicador/meta.py` | Facebook (página) e Instagram (Content Publishing API) |
 | `publicador/x_api.py` | X, solo si se cargan las claves |
 | `publicador/setup_check.py` | Chequeo de configuración: dice qué falta |
