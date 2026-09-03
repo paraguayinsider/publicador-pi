@@ -5,6 +5,10 @@ name: Chequeo de configuración
 on:
   workflow_dispatch:
 
+# Mismos permisos que el workflow Publicar, para que el chequeo refleje la realidad
+permissions:
+  contents: write
+
 jobs:
   chequear:
     runs-on: ubuntu-latest
