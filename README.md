@@ -16,7 +16,8 @@ Notion (Calendario editorial)  ←→  GitHub Actions (cada hora)  →  Facebook
 | `publicador/notion_db.py` | Lectura/escritura de la base de Notion |
 | `publicador/media.py` | Baja la imagen de Notion, la convierte a JPEG y la guarda en el repo público |
 | `publicador/meta.py` | Facebook (página) e Instagram (Content Publishing API) |
-| `publicador/x_api.py` | X, solo si se cargan las claves |
+| `publicador/linkedin.py` | LinkedIn (Posts API, perfil o página) |
+| `publicador/x_api.py` | X, solo si se cargan las claves (hoy: manual) |
 | `publicador/setup_check.py` | Chequeo de configuración: dice qué falta |
 | `publicador/config.py` | Nombres de columnas, estados y variables de entorno |
 | `.github/workflows/publicar.yml` | El cron horario |
@@ -36,8 +37,8 @@ Reglas que aplica el robot:
 - **Formato `imagen`**: exactamente 1 archivo. **`carrusel`**: 2 a 10 imágenes. **`reel`**: 1 video `.mp4`. **`solo texto`**: sin archivo (Instagram no lo admite → Error).
 - **Instagram** rechaza imágenes fuera de la relación 4:5 a 1.91:1. El robot avisa con Error antes de intentar; Fabri recorta y vuelve a subir.
 - **Vencidas**: si la fecha pasó hace más de 48 h (por ejemplo, el robot estuvo apagado), no publica: marca Error "vencida" para que Augusto decida. Se cambia con `MAX_DELAY_HOURS`.
-- **LinkedIn**: el robot la ignora (queda en Aprobado). Se programa a mano en LinkedIn una vez al mes hasta que LinkedIn apruebe el acceso a su API.
-- **X**: si no están las claves, las filas con Red = X dan Error "X no está configurado". Texto máximo 280 caracteres (cada link cuenta 23). Video en X no soportado.
+- **LinkedIn**: con `LINKEDIN_ACCESS_TOKEN` cargado, el robot publica (texto, imagen o varias imágenes; video no) como el perfil del token o como la página si `LINKEDIN_AUTHOR_URN` es `urn:li:organization:…`. Texto máximo 3.000 caracteres. Sin token, las filas quedan en Aprobado para publicar a mano.
+- **X**: decisión actual: **sin API (es paga)**. Las filas con Red = X quedan en Aprobado y se programan a mano en X; quien publica pasa la fila a Publicado y pega el link. El código para X existe: si algún día se cargan las 4 claves, publica solo (280 caracteres, cada link cuenta 23, sin video).
 - **Token de Meta**: si vence en ≤ 7 días, el job termina en fallo y GitHub manda un mail al dueño del repo. Un token de página derivado de un token de usuario de larga duración **no vence**; el aviso existe por si se generó de otra forma.
 - **Cuota de Instagram**: 50 publicaciones por API cada 24 h (documentación de Meta, 2026).
 
@@ -104,7 +105,8 @@ Requisitos previos: Instagram en **cuenta profesional** (Configuración → Tipo
    | `META_PAGE_ID` | paso 2.5 |
    | `META_PAGE_TOKEN` | paso 2.5 |
    | `IG_USER_ID` | paso 2.6 |
-   | `X_CONSUMER_KEY` … `X_ACCESS_TOKEN_SECRET` | solo si se decide X (ver abajo) |
+   | `LINKEDIN_ACCESS_TOKEN`, `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | paso 5 |
+   | `X_CONSUMER_KEY` … `X_ACCESS_TOKEN_SECRET` | solo si algún día se activa la API de X (paso 6) |
 
 3. Pestaña **Actions** → si pide habilitar workflows, habilitarlos.
 
@@ -118,9 +120,17 @@ Requisitos previos: Instagram en **cuenta profesional** (Configuración → Tipo
 4. Repetir sin *dry_run*. La fila debe pasar a Publicado con la URL. Borrar la publicación de prueba en Facebook si se quiere.
 5. Lo mismo con Instagram. Desde ahí, el cron corre solo cada hora (minuto 7, hora UTC; en Asunción es la misma hora de reloj, cada hora).
 
-### 5. X (pendiente de decisión)
+### 5. LinkedIn
 
-El nivel gratuito de la API de X no existe para cuentas nuevas; se paga por uso. **Verificar precios en https://developer.x.com antes de crear la cuenta.** Si se decide X:
+1. https://www.linkedin.com/developers/apps → **Create app**: nombre "Publicador PI", asociarla a la página de LinkedIn de Paraguay Insider, logo, aceptar términos. Crear.
+2. Pestaña **Products** → **Request access** en *Share on LinkedIn* y en *Sign In with LinkedIn using OpenID Connect* (los dos se aprueban al instante). Opcional, para publicar como página más adelante: *Community Management API* (formulario; LinkedIn revisa).
+3. Pestaña **Auth** → copiar **Client ID** → secret `LINKEDIN_CLIENT_ID`; **Client Secret** → secret `LINKEDIN_CLIENT_SECRET` (sirven para que el robot consulte el vencimiento del token).
+4. Token: en el portal → **Tools → OAuth 2.0 token generator** (https://www.linkedin.com/developers/tools/oauth) → elegir la app → marcar `openid`, `profile`, `w_member_social` → **Request access token** → autorizar con el perfil que va a publicar → copiar el token → secret `LINKEDIN_ACCESS_TOKEN`.
+5. El token **dura 60 días**. Siete días antes el job Publicar falla con un aviso (mail de GitHub): repetir el paso 4 y actualizar el secret. Con acceso aprobado a la Community Management API, agregar `w_organization_social` en el paso 4 y crear la variable `LINKEDIN_AUTHOR_URN = urn:li:organization:<id de la página>` en *Settings → Secrets and variables → Actions → Variables*.
+
+### 6. X (decisión actual: sin API)
+
+La API de X es paga (docs.x.com/x-api/getting-started/pricing, 3-9-2026: US$ 0,015 por post, US$ 0,20 si lleva link; créditos prepagos, sin nivel gratuito). Se decidió no pagar: X se programa a mano desde x.com (tiene programación nativa gratuita) siguiendo el calendario. Si en el futuro se decide activar la API:
 
 1. https://developer.x.com → crear proyecto y app → *User authentication settings*: permisos **Read and write**, tipo *Web App*, cualquier URL de callback.
 2. *Keys and tokens* → **API Key and Secret** (`X_CONSUMER_KEY`, `X_CONSUMER_SECRET`) y **Access Token and Secret** (`X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`; generarlos *después* de poner Read and write, si no quedan de solo lectura).
@@ -133,7 +143,7 @@ El nivel gratuito de la API de X no existe para cuentas nuevas; se paga por uso.
 3. Augusto revisa y pasa a **Aprobado**.
 4. El robot publica a la hora indicada. Las filas quedan en **Publicado** con el link.
 5. Si una fila queda en **Error**, la columna Error dice qué pasó. Corregir → volver a **Aprobado**.
-6. LinkedIn: programar a mano en LinkedIn (~12 posts, una vez al mes).
+6. X: programar a mano en x.com desde las filas del calendario; al hacerlo, pasar la fila a Publicado y pegar el link. LinkedIn lo publica el robot (perfil ahora; página cuando LinkedIn apruebe el acceso).
 
 Mails automáticos de GitHub: solo cuando el job falla (token por vencer, Notion inaccesible). Un Error en una fila **no** es fallo del job: se ve en Notion.
 
