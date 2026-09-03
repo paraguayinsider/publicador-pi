@@ -70,6 +70,14 @@ class Settings:
     x_access_token: str | None = field(default_factory=lambda: _env("X_ACCESS_TOKEN"))
     x_access_token_secret: str | None = field(default_factory=lambda: _env("X_ACCESS_TOKEN_SECRET"))
 
+    # LinkedIn (opcional). Token de 60 días generado en el portal de desarrolladores.
+    linkedin_access_token: str | None = field(default_factory=lambda: _env("LINKEDIN_ACCESS_TOKEN"))
+    linkedin_client_id: str | None = field(default_factory=lambda: _env("LINKEDIN_CLIENT_ID"))
+    linkedin_client_secret: str | None = field(default_factory=lambda: _env("LINKEDIN_CLIENT_SECRET"))
+    # urn:li:person:XXXX (perfil) o urn:li:organization:XXXX (página). Vacío = el perfil del token.
+    linkedin_author_urn: str | None = field(default_factory=lambda: _env("LINKEDIN_AUTHOR_URN"))
+    linkedin_version: str = field(default_factory=lambda: _env("LINKEDIN_VERSION", "202608"))
+
     # Comportamiento
     timezone: str = field(default_factory=lambda: _env("TIMEZONE", "America/Asuncion"))
     max_delay_hours: float = field(default_factory=lambda: float(_env("MAX_DELAY_HOURS", "48")))
@@ -84,6 +92,14 @@ class Settings:
     @property
     def meta_enabled(self) -> bool:
         return bool(self.meta_page_id and self.meta_page_token)
+
+    @property
+    def linkedin_enabled(self) -> bool:
+        return bool(self.linkedin_access_token)
+
+    def is_manual(self, network: str) -> bool:
+        """Redes sin credenciales: se programan a mano y el robot no las toca."""
+        return (network == "x" and not self.x_enabled) or (network == "linkedin" and not self.linkedin_enabled)
 
     @property
     def media_enabled(self) -> bool:

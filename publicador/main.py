@@ -27,6 +27,7 @@ class Runner:
         self.db = NotionDB(settings)
         self._graph = None
         self._x = None
+        self._linkedin = None
         self._media = None
         self.warnings: list[str] = []
 
@@ -74,8 +75,9 @@ class Runner:
             err += result == "error"
             skipped += result == "skip"
 
-        # 3. salud del token de Meta (avisa por fallo del workflow → mail de GitHub)
+        # 3. salud de los tokens (avisa por fallo del workflow → mail de GitHub)
         self.check_meta_token(now)
+        self.check_linkedin_token(now)
 
         log.info("Listo: %d publicadas, %d con error, %d omitidas", ok, err, skipped)
         if self.warnings:
@@ -86,9 +88,10 @@ class Runner:
 
     def process(self, post: Post, now: datetime) -> str:
         label = f"[{post.network}/{post.format}] {post.title!r}"
-        # LinkedIn: manual hasta que LinkedIn apruebe el acceso a la API
-        if post.network == "linkedin":
-            log.info("%s: LinkedIn se programa a mano; la fila queda en Aprobado", label)
+        # Redes sin credenciales (X sin API paga; LinkedIn sin token): se programan a mano.
+        # La fila queda en Aprobado; quien la publica a mano la pasa a Publicado con el link.
+        if post.network in ("linkedin", "x") and self.s.is_manual(post.network):
+            log.info("%s: %s se programa a mano; la fila queda en Aprobado", label, post.network)
             return "skip"
         try:
             self.validate(post, now)
@@ -128,17 +131,23 @@ class Runner:
                 raise PublishError("El formato 'reel' necesita exactamente 1 video .mp4")
         if post.format == "solo texto" and not post.text.strip():
             raise PublishError("La fila no tiene texto")
-        if post.network == "x" and not self.s.x_enabled:
-            raise PublishError("X no está configurado en el robot (faltan las claves). Publicalo a mano o configurá X.")
         if post.network in ("facebook", "instagram") and not self.s.meta_enabled:
             raise PublishError("Meta no está configurado en el robot (faltan META_PAGE_ID / META_PAGE_TOKEN)")
 
+    @property
+    def linkedin(self):
+        if self._linkedin is None:
+            from .linkedin import LinkedInClient
+            self._linkedin = LinkedInClient(self.s)
+        return self._linkedin
+
     def publish(self, post: Post) -> str:
-        if post.network == "x":
+        if post.network in ("x", "linkedin"):
             images = []
             if post.format in ("imagen", "carrusel"):
                 images = [to_jpeg(download(f)) for f in post.files]
-            return self.x.publish(post.format, post.text, images)
+            client = self.x if post.network == "x" else self.linkedin
+            return client.publish(post.format, post.text, images)
 
         # Facebook / Instagram: los medios van a URL pública
         urls: list[str] = []
@@ -171,6 +180,25 @@ class Runner:
         if days <= self.s.token_warn_days:
             self.warnings.append(
                 f"El token de Meta vence en {days} días ({exp.date()}). Renovalo y actualizá META_PAGE_TOKEN en GitHub Secrets.")
+
+
+    def check_linkedin_token(self, now: datetime) -> None:
+        if not self.s.linkedin_enabled:
+            return
+        try:
+            exp = self.linkedin.token_expiry()
+        except PublishError as exc:
+            self.warnings.append(f"Token de LinkedIn: {exc}")
+            return
+        if exp is None:
+            log.info("Token de LinkedIn: vencimiento no consultable (faltan LINKEDIN_CLIENT_ID/SECRET)")
+            return
+        days = (exp - now).days
+        log.info("Token de LinkedIn vence en %d días (%s)", days, exp.date())
+        if days <= self.s.token_warn_days:
+            self.warnings.append(
+                f"El token de LinkedIn vence en {days} días ({exp.date()}). Generá uno nuevo en el portal de "
+                f"desarrolladores (OAuth 2.0 token generator) y actualizá LINKEDIN_ACCESS_TOKEN en GitHub Secrets.")
 
 
 def main() -> int:

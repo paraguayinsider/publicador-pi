@@ -171,10 +171,38 @@ def check_media(s) -> bool:
     return False
 
 
+def check_linkedin(s) -> bool:
+    print("\n[LinkedIn]")
+    if not s.linkedin_enabled:
+        warn("LinkedIn no configurado (opcional). Las filas con Red = LinkedIn quedan para publicar a mano.")
+        return True
+    from .linkedin import LinkedInClient
+    li = LinkedInClient(s)
+    try:
+        me = li.me()
+        ok(f"Token válido; perfil: {me.get('name')} (urn:li:person:{me.get('sub')})")
+    except Exception as exc:
+        bad(f"LinkedIn: {exc}")
+        bad("Generá un token nuevo en el portal de desarrolladores (OAuth 2.0 token generator) con los "
+            "permisos openid, profile y w_member_social")
+        return False
+    ok(f"Publica como: {li.author}" + ("" if s.linkedin_author_urn else " (perfil del token)"))
+    try:
+        exp = li.token_expiry()
+        if exp is None:
+            warn("Sin LINKEDIN_CLIENT_ID/SECRET no puedo consultar el vencimiento (el token dura 60 días)")
+        else:
+            ok(f"Token vence el {exp.date()}")
+    except Exception as exc:
+        bad(f"Vencimiento del token: {exc}")
+        return False
+    return True
+
+
 def check_x(s) -> bool:
     print("\n[X]")
     if not s.x_enabled:
-        warn("X no configurado (opcional). Las filas con Red = X darán Error hasta que se configure.")
+        warn("X no configurado (opcional). Las filas con Red = X quedan para publicar a mano.")
         return True
     from .x_api import XClient
     try:
@@ -189,7 +217,7 @@ def check_x(s) -> bool:
 def main() -> int:
     s = load_settings()
     print(f"Publicador PI — chequeo de configuración (zona {s.timezone}, Graph {s.graph_version}, Notion {s.notion_version})")
-    results = [check_notion(s), check_meta(s), check_media(s), check_x(s)]
+    results = [check_notion(s), check_meta(s), check_media(s), check_linkedin(s), check_x(s)]
     print()
     if all(results):
         print("Todo listo. Probá con: DRY_RUN=1 python -m publicador.main")
