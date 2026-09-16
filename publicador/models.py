@@ -31,4 +31,4 @@ class Post:
 
     @property
     def short_id(self) -> str:
-        return self.page_id.replace("-", "")[:8]
+        return self.page_id.replace("-", "")[-12:]  # los últimos 12: los primeros se repiten entre filas creadas juntas
