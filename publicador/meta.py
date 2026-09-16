@@ -17,144 +17,158 @@ URL_RE = re.compile(r"https?://\S+")
 
 
 class Graph:
-    def __init__(self, settings: Settings):
-        if not settings.meta_enabled:
-            raise RuntimeError("Faltan META_PAGE_ID o META_PAGE_TOKEN")
-        self.s = settings
-        self.base = f"https://graph.facebook.com/{settings.graph_version}"
-        self.token = settings.meta_page_token  # puede ser token de página, de usuario o de usuario del sistema
+        def __init__(self, settings: Settings):
+                    if not settings.meta_enabled:
+                                    raise RuntimeError("Faltan META_PAGE_ID o META_PAGE_TOKEN")
+                                self.s = settings
+                    self.base = f"https://graph.facebook.com/{settings.graph_version}"
+                    self.token = settings.meta_page_token  # puede ser token de página, de usuario o de usuario del sistema
         self._page_token: str | None = None
 
     def page_token(self) -> str:
-        """Token de página para publicar. Si META_PAGE_TOKEN es de usuario o de usuario del
-        sistema (Business Manager), se canjea por el token de la página una vez por corrida."""
-        if self._page_token:
-            return self._page_token
-        info = self.call("GET", "debug_token", input_token=self.token)["data"]
+                """Token de página para publicar. Si META_PAGE_TOKEN es de usuario o de usuario del
+                        sistema (Business Manager), se canjea por el token de la página una vez por corrida."""
+                if self._page_token:
+                                return self._page_token
+                            info = self.call("GET", "debug_token", input_token=self.token)["data"]
         if info.get("type") == "PAGE":
-            self._page_token = self.token
-        else:
+                        self._page_token = self.token
+else:
             data = self.call("GET", self.s.meta_page_id, fields="access_token")
             if not data.get("access_token"):
-                raise PublishError("El token no tiene acceso a la página (falta asignarla al usuario del sistema "
-                                   "o el permiso pages_manage_posts)")
-            self._page_token = data["access_token"]
+                                raise PublishError("El token no tiene acceso a la página (falta asignarla al usuario del sistema "
+                                                                                      "o el permiso pages_manage_posts)")
+                            self._page_token = data["access_token"]
         return self._page_token
 
     def call(self, method: str, path: str, **params) -> dict:
-        params.setdefault("access_token", self.token)
+                params.setdefault("access_token", self.token)
         if method == "GET":
-            r = requests.get(f"{self.base}/{path}", params=params, timeout=120)
-        else:
+                        r = requests.get(f"{self.base}/{path}", params=params, timeout=120)
+else:
             r = requests.post(f"{self.base}/{path}", data=params, timeout=300)
         try:
-            data = r.json()
-        except ValueError:
+                        data = r.json()
+except ValueError:
             raise PublishError(f"Meta devolvió una respuesta no JSON ({r.status_code})")
         if r.status_code >= 400 or "error" in data:
-            err = data.get("error", {})
-            msg = err.get("error_user_msg") or err.get("message") or r.text[:300]
-            raise PublishError(f"Meta ({path}): {msg} [code {err.get('code')}, sub {err.get('error_subcode')}]")
-        return data
+                        err = data.get("error", {})
+                        msg = err.get("error_user_msg") or err.get("message") or r.text[:300]
+                        raise PublishError(f"Meta ({path}): {msg} [code {err.get('code')}, sub {err.get('error_subcode')}]")
+                    return data
 
     # ---------- token ----------
     def token_expiry(self) -> datetime | None:
-        """None = no vence. Lanza PublishError si el token es inválido."""
+                """None = no vence. Lanza PublishError si el token es inválido."""
         data = self.call("GET", "debug_token", input_token=self.token)["data"]
         if not data.get("is_valid", False):
-            raise PublishError(f"El token de Meta no es válido: {data.get('error', {}).get('message')}")
-        exp = data.get("expires_at") or 0
+                        raise PublishError(f"El token de Meta no es válido: {data.get('error', {}).get('message')}")
+                    exp = data.get("expires_at") or 0
         return datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
 
     def token_scopes(self) -> list[str]:
-        return self.call("GET", "debug_token", input_token=self.token)["data"].get("scopes", [])
+                return self.call("GET", "debug_token", input_token=self.token)["data"].get("scopes", [])
 
     # ---------- Facebook ----------
     def fb_publish(self, fmt: str, text: str, media_urls: list[str]) -> str:
-        page = self.s.meta_page_id
+                page = self.s.meta_page_id
         if self.s.dry_run:
-            log.info("[DRY RUN] Facebook %s: %r + %s", fmt, text[:60], media_urls)
-            return "https://www.facebook.com/dry-run"
-        tk = self.page_token()
+                        log.info("[DRY RUN] Facebook %s: %r + %s", fmt, text[:60], media_urls)
+                        return "https://www.facebook.com/dry-run"
+                    tk = self.page_token()
         if fmt == "solo texto":
-            params = {"message": text}
-            links = URL_RE.findall(text)
-            if links:
-                params["link"] = links[0].rstrip(".,)")
-            post_id = self.call("POST", f"{page}/feed", access_token=tk, **params)["id"]
-        elif fmt == "imagen":
+                        params = {"message": text}
+                        links = URL_RE.findall(text)
+                        if links:
+                                            params["link"] = links[0].rstrip(".,)")
+                                        post_id = self.call("POST", f"{page}/feed", access_token=tk, **params)["id"]
+elif fmt == "imagen":
             res = self.call("POST", f"{page}/photos", access_token=tk, url=media_urls[0], message=text)
             post_id = res.get("post_id") or res["id"]
-        elif fmt == "carrusel":
+elif fmt == "carrusel":
             ids = [self.call("POST", f"{page}/photos", access_token=tk, url=u, published="false")["id"]
-                   for u in media_urls]
+                                      for u in media_urls]
             import json
             post_id = self.call("POST", f"{page}/feed", access_token=tk, message=text,
-                                attached_media=json.dumps([{"media_fbid": i} for i in ids]))["id"]
-        elif fmt == "reel":
+                                                                attached_media=json.dumps([{"media_fbid": i} for i in ids]))["id"]
+elif fmt == "reel":
             res = self.call("POST", f"{page}/videos", access_token=tk, file_url=media_urls[0], description=text)
             vid = res["id"]
             return self._fb_video_permalink(vid)
-        else:
+else:
             raise PublishError(f"Formato '{fmt}' no soportado en Facebook")
         return self.call("GET", post_id, access_token=tk, fields="permalink_url").get("permalink_url") \
             or f"https://www.facebook.com/{post_id}"
 
     def _fb_video_permalink(self, video_id: str) -> str:
-        for _ in range(10):
-            data = self.call("GET", video_id, access_token=self.page_token(), fields="permalink_url,status")
-            url = data.get("permalink_url")
-            if url:
-                return url if url.startswith("http") else f"https://www.facebook.com{url}"
-            time.sleep(15)
+                for _ in range(10):
+                                data = self.call("GET", video_id, access_token=self.page_token(), fields="permalink_url,status")
+                                url = data.get("permalink_url")
+                                if url:
+                                                    return url if url.startswith("http") else f"https://www.facebook.com{url}"
+                                                time.sleep(15)
         return f"https://www.facebook.com/{self.s.meta_page_id}/videos/{video_id}"
 
     # ---------- Instagram ----------
     def ig_publish(self, fmt: str, text: str, media_urls: list[str]) -> str:
-        ig = self.s.ig_user_id
+                ig = self.s.ig_user_id
         if not ig:
-            raise PublishError("Falta IG_USER_ID (id de la cuenta profesional de Instagram)")
+                        raise PublishError("Falta IG_USER_ID (id de la cuenta profesional de Instagram)")
         if fmt == "solo texto":
-            raise PublishError("Instagram no admite publicaciones sin imagen. Cambiá el formato o subí una imagen.")
+                        raise PublishError("Instagram no admite publicaciones sin imagen. Cambiá el formato o subí una imagen.")
         if fmt not in ("imagen", "carrusel", "reel"):
-            raise PublishError(f"Formato '{fmt}' no soportado en Instagram")
+                        raise PublishError(f"Formato '{fmt}' no soportado en Instagram")
         if self.s.dry_run:
-            log.info("[DRY RUN] Instagram %s: %r + %s", fmt, text[:60], media_urls)
+                        log.info("[DRY RUN] Instagram %s: %r + %s", fmt, text[:60], media_urls)
             return "https://www.instagram.com/p/dry-run/"
         if fmt == "imagen":
-            cid = self.call("POST", f"{ig}/media", image_url=media_urls[0], caption=text)["id"]
-        elif fmt == "carrusel":
+                        cid = self.call("POST", f"{ig}/media", image_url=media_urls[0], caption=text)["id"]
+elif fmt == "carrusel":
             if not 2 <= len(media_urls) <= 10:
-                raise PublishError("Un carrusel necesita entre 2 y 10 imágenes")
+                                raise PublishError("Un carrusel necesita entre 2 y 10 imágenes")
             children = [self.call("POST", f"{ig}/media", image_url=u, is_carousel_item="true")["id"]
-                        for u in media_urls]
+                                                for u in media_urls]
             cid = self.call("POST", f"{ig}/media", media_type="CAROUSEL",
-                            children=",".join(children), caption=text)["id"]
-        elif fmt == "reel":
+                                                        children=",".join(children), caption=text)["id"]
+elif fmt == "reel":
             cid = self.call("POST", f"{ig}/media", media_type="REELS", video_url=media_urls[0],
-                            caption=text, share_to_feed="true")["id"]
-            self._ig_wait(cid)
-        else:
+                                                        caption=text, share_to_feed="true")["id"]
+else:
             raise PublishError(f"Formato '{fmt}' no soportado en Instagram")
-        media_id = self.call("POST", f"{ig}/media_publish", creation_id=cid)["id"]
+        # Las imágenes también se procesan (segundos); si se publica antes, Meta devuelve
+        # "El archivo multimedia no está listo" (code 9007 / sub 2207027).
+        self._ig_wait(cid, max_wait=420 if fmt == "reel" else 120, step=5 if fmt != "reel" else 20)
+        media_id = self._ig_publish_container(ig, cid)
         return self.call("GET", media_id, fields="permalink").get("permalink") \
             or f"https://www.instagram.com/{media_id}"
 
-    def _ig_wait(self, container_id: str, max_wait: int = 420) -> None:
-        """Los videos se procesan antes de poder publicarse."""
+    def _ig_publish_container(self, ig: str, cid: str, tries: int = 4) -> str:
+                """media_publish con reintentos si Meta todavía no terminó de procesar el contenedor."""
+        for attempt in range(tries):
+                        try:
+                                            return self.call("POST", f"{ig}/media_publish", creation_id=cid)["id"]
+except PublishError as exc:
+                if "9007" in str(exc) and attempt < tries - 1:
+                                        time.sleep(15)
+                                        continue
+                                    raise
+        raise PublishError("Instagram no terminó de procesar el contenido")
+
+    def _ig_wait(self, container_id: str, max_wait: int = 420, step: int = 20) -> None:
+                """Espera a que el contenedor (imagen, carrusel o video) esté FINISHED."""
         waited = 0
         while waited < max_wait:
-            data = self.call("GET", container_id, fields="status_code,status")
+                        data = self.call("GET", container_id, fields="status_code,status")
             code = data.get("status_code")
             if code == "FINISHED":
-                return
+                                return
             if code in ("ERROR", "EXPIRED"):
-                raise PublishError(f"Instagram no pudo procesar el video: {data.get('status')}")
-            time.sleep(20)
-            waited += 20
-        raise PublishError("Instagram tardó más de 7 minutos en procesar el video")
+                                raise PublishError(f"Instagram no pudo procesar el contenido: {data.get('status')}")
+            time.sleep(step)
+            waited += step
+        raise PublishError(f"Instagram tardó más de {max_wait // 60} minutos en procesar el contenido")
 
     def ig_daily_quota(self) -> dict:
-        ig = self.s.ig_user_id
+                ig = self.s.ig_user_id
         data = self.call("GET", f"{ig}/content_publishing_limit", fields="quota_usage,config")
         return (data.get("data") or [{}])[0]
